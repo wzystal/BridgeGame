@@ -423,6 +423,8 @@ export default function GamePlayScreen({
    * 4. 违规 → 显示提示信息
    */
   const handleCardPlay = useCallback((position: Position, card: Card) => {
+    console.log(`GamePlayScreen.handleCardPlay 被调用: ${position} 出 ${card.suit}${card.rank}, 当前轮到=${gameState.currentPlayer}`);
+
     // 检查是否轮到这个玩家
     if (gameState.currentPlayer !== position) {
       setInvalidMessage('还没轮到你出牌！');

@@ -46,7 +46,7 @@
  * =============================================================================
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 
@@ -242,12 +242,6 @@ export default function App() {
     isShowing: boolean;
   }>({ trick: null, winner: null, isShowing: false });
 
-  /**
-   * 【墩正在结算中】
-   * 当墩满4张牌时设置为 true，2秒结算完成后设置为 false
-   * 用于防止 AI 在结算期间反复尝试出牌
-   */
-  const [isTrickSettling, setIsTrickSettling] = useState(false);
 
   /**
    * 【游戏结束结算信息】
@@ -272,6 +266,10 @@ export default function App() {
    * @param cardCount - 牌制：6张（幼儿园）、8张（小学）、13张（标准）
    */
   const handleStartSinglePlayer = useCallback((cardCount: 6 | 8 | 13 = 13) => {
+    // 【关键】清除残留状态，确保新游戏开始时状态干净
+    setCompletedTrickDisplay({ trick: null, winner: null, isShowing: false });
+    setGameOverResult(null);
+
     // 创建新游戏状态，传入牌制
     const newGame = createNewGame(cardCount);
     setGameState(newGame);
@@ -284,6 +282,10 @@ export default function App() {
    * 在游戏界面点击"重新发牌"后触发
    */
   const handleResetGame = useCallback(() => {
+    // 【关键】重置所有游戏相关状态，防止残留状态影响新游戏
+    setCompletedTrickDisplay({ trick: null, winner: null, isShowing: false });
+    setGameOverResult(null);
+
     // 使用当前牌制或默认13张
     const currentCardCount = gameState?.cardCount ?? 13;
     const newGame = createNewGame(currentCardCount);
@@ -305,6 +307,11 @@ export default function App() {
    * 4. 触发 AI 行动（如果下家是 AI）
    */
   const handlePlayCard = useCallback((position: Position, card: Card) => {
+    // 追踪调用来源
+    const stack = new Error().stack;
+    const caller = stack?.split('\n')[2]?.trim() || 'unknown';
+    console.log(`handlePlayCard 被调用: ${position} 出 ${card.suit}${card.rank}, 当前墩=${gameState?.currentTrick.cards.length || 0}张, 调用者=${caller}`);
+
     setGameState(prevState => {
       if (!prevState) return null;
 
@@ -352,7 +359,7 @@ export default function App() {
         });
 
         // 【关键】标记墩正在结算中，防止 AI 在此期间反复尝试出牌
-        setIsTrickSettling(true);
+        // 已移除 isTrickSettling 状态，改为通过检查 currentTrick.cards.length 来判断
 
         // 检查游戏是否结束（所有牌出完）
         const isGameOver = prevState.completedTricks.length + 1 >= prevState.cardCount;
@@ -384,8 +391,7 @@ export default function App() {
               winner: gameWinner,
               message,
             });
-            // 【关键】游戏结束时也要清除结算标记
-            setIsTrickSettling(false);
+            // 【关键】游戏结束时也要清除结算标记（已移除 isTrickSettling 状态）
           }, 2000);
         } else {
           // 游戏未结束：延迟2秒后清空当前墩，开始新的一墩
@@ -400,12 +406,12 @@ export default function App() {
             });
             // 清空显示状态
             setCompletedTrickDisplay({ trick: null, winner: null, isShowing: false });
-            // 【关键】清除结算标记，允许 AI 继续出牌
-            setIsTrickSettling(false);
+            // 【关键】清除结算标记，允许 AI 继续出牌（已移除 isTrickSettling 状态）
           }, 2000); // 2秒延迟，让玩家看清结果
         }
 
-        // 立即返回状态更新（但不改变 currentTrick，等延迟后再改）
+        // 立即返回状态更新（但不改变 currentTrick 和 currentPlayer，等延迟后再改）
+        // 【关键】不立即设置 currentPlayer 为赢家，避免 AI useEffect 被反复触发
         return {
           ...prevState,
           players: updatedPlayers,
@@ -414,12 +420,14 @@ export default function App() {
           ewTricks: newEwTricks,
           // currentTrick 保持为 updatedTrick，让第4张牌显示出来
           currentTrick: updatedTrick,
-          currentPlayer: winner, // 赢家领出下一墩
+          // currentPlayer 暂时保持不变，等2秒后再设置为赢家
+          currentPlayer: prevState.currentPlayer,
         };
       }
 
       // 墩未满，轮到下家
       const nextPlayer = getNextPosition(position);
+      console.log(`handlePlayCard: ${position} 出完牌，轮到 ${nextPlayer} (墩=${updatedTrick.cards.length}张)`);
 
       return {
         ...prevState,
@@ -451,13 +459,10 @@ export default function App() {
    * 避免 gameState 更新导致无限循环。
    */
   useEffect(() => {
-    // 关键：审牌阶段、没有游戏状态、游戏已结束、或墩正在结算中时，不执行 AI 出牌
-    if (currentScreen !== 'game' || !gameState || gameOverResult?.isShowing || isTrickSettling) {
-      if (isTrickSettling) {
-        console.log('AI: 墩正在结算中，暂停出牌');
-      }
-      return;
-    }
+    console.log(`AI Effect 触发: currentPlayer=${gameState?.currentPlayer}, cardCount=${gameState?.currentTrick.cards.length}`);
+
+    // 关键：审牌阶段、没有游戏状态、或游戏已结束时，不执行 AI 出牌
+    if (currentScreen !== 'game' || !gameState || gameOverResult?.isShowing) return;
 
     const currentPlayer = gameState.players.find(
       p => p.position === gameState.currentPlayer
@@ -478,10 +483,13 @@ export default function App() {
       shouldAIPlay = true;
       console.log(`AI: ${currentPlayer.position} 是明手，由 AI 代打`);
     } else {
-      console.log(`AI: ${currentPlayer.position} 是人类玩家，跳过`);
+      console.log(`AI: ${currentPlayer.position} 是人类玩家，跳过 (currentPlayer=${gameState.currentPlayer})`);
     }
 
-    if (!shouldAIPlay) return;
+    if (!shouldAIPlay) {
+      console.log(`AI: ${currentPlayer.position} 不代打，直接返回`);
+      return;
+    }
 
     // 延迟一下，让玩家能看到 AI 在"思考"
     const timer = setTimeout(() => {
@@ -507,8 +515,17 @@ export default function App() {
           return latestGameState;
         }
 
+        // 【关键保护】检查游戏是否已结束（所有墩都打完）
+        if (latestGameState.completedTricks.length >= latestGameState.cardCount) {
+          console.log('AI: 游戏已结束，跳过出牌');
+          return latestGameState;
+        }
+
         // 获取队友方位
         const partnerPosition = getPartner(currentPlayer.position);
+
+        // 【诊断日志】检查手牌状态
+        console.log(`AI: ${latestCurrentPlayer.position} 手牌数量=${latestCurrentPlayer.hand.length}, 当前墩牌数=${latestGameState.currentTrick.cards.length}`);
 
         // 调用 AI 引擎决策
         const cardToPlay = makeAIDecision(
@@ -520,9 +537,11 @@ export default function App() {
 
         // 【防御性编程】如果 AI 无法决策（手牌为空），跳过
         if (!cardToPlay) {
-          console.log('AI: 无法决策，跳过出牌（游戏可能已结束）');
+          console.log(`AI: ${latestCurrentPlayer.position} 无法决策，手牌为空或游戏已结束`);
           return latestGameState;
         }
+
+        console.log(`AI: ${latestCurrentPlayer.position} 决定出 ${cardToPlay.suit}${cardToPlay.rank}`);
 
         // 执行出牌（异步调用 handlePlayCard）
         setTimeout(() => {
@@ -535,7 +554,7 @@ export default function App() {
 
     return () => clearTimeout(timer);
     // 【关键依赖】只监听必要的状态变化，避免不必要的重新触发
-  }, [currentScreen, gameState?.currentPlayer, isTrickSettling, gameOverResult?.isShowing]);
+  }, [currentScreen, gameState?.currentPlayer, gameOverResult?.isShowing]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // 渲染部分

@@ -133,7 +133,7 @@ export function selectFollowCard(
   leadSuit: Suit,
   myPosition: Position,
   partnerPosition: Position
-): Card {
+): Card | null {
   // 第一步：检查是否持有领出花色
   const hasLeadSuit = hasSuit(hand, leadSuit);
   
@@ -148,18 +148,24 @@ export function selectFollowCard(
   // ─────────────────────────────────────────────────────────────────────────
   // 情况二：持有领出花色，必须从该花色出
   // ─────────────────────────────────────────────────────────────────────────
-  
+
   // 获取领出花色的所有牌
   const leadSuitCards = getCardsOfSuit(hand, leadSuit);
-  
+
+  // 【防御性编程】确保领出花色的牌存在
+  if (!leadSuitCards || leadSuitCards.length === 0) {
+    console.warn(`AI selectFollowCard: 领出花色 ${leadSuit} 无牌可出，回退到垫牌`);
+    return selectDiscardCard(hand);
+  }
+
   // 分析当前墩的形势
   const currentTopCard = getCurrentWinningCard(trick, leadSuit);
-  const isPartnerWinning = currentTopCard && 
+  const isPartnerWinning = currentTopCard &&
     getCardOwner(trick, currentTopCard) === partnerPosition;
-  const isEnemyWinning = currentTopCard && 
+  const isEnemyWinning = currentTopCard &&
     getCardOwner(trick, currentTopCard) !== myPosition &&
     getCardOwner(trick, currentTopCard) !== partnerPosition;
-  
+
   // 我能出的最大牌
   const myHighest = leadSuitCards[0];
   const myHighestValue = RANK_VALUES[myHighest.rank];
@@ -217,7 +223,13 @@ export function selectFollowCard(
  * @param hand - AI 的当前手牌
  * @returns 决定垫的卡牌
  */
-export function selectDiscardCard(hand: Hand): Card {
+export function selectDiscardCard(hand: Hand): Card | null {
+  // 【防御性编程】检查手牌
+  if (!hand || hand.length === 0) {
+    console.warn('AI selectDiscardCard: 手牌为空');
+    return null;
+  }
+
   // 第一步：计算每个花色的"价值"
   // 价值 = 大牌点总和 + 长度惩罚（越短越优先垫）
   const suitValues: Record<Suit, number> = {
@@ -226,32 +238,39 @@ export function selectDiscardCard(hand: Hand): Card {
     [Suit.Clubs]: 0,
     [Suit.Diamonds]: 0,
   };
-  
+
   // 计算每个花色的 HCP 总和
   for (const card of hand) {
     suitValues[card.suit] += card.hcp;
   }
-  
+
   // 长度惩罚：每个花色张数 * -0.5
   // 这样短套会得到负分，更容易被选为垫牌花色
   const lengths = getSuitLengths(hand);
   for (const suit of SUIT_ORDER) {
     suitValues[suit] += lengths[suit] * (-0.5);
   }
-  
+
   // 第二步：找出价值最低的花色
   let discardSuit = SUIT_ORDER[0];
   let lowestValue = suitValues[discardSuit];
-  
+
   for (const suit of SUIT_ORDER) {
     if (suitValues[suit] < lowestValue) {
       lowestValue = suitValues[suit];
       discardSuit = suit;
     }
   }
-  
+
   // 第三步：从这个花色中垫最小的牌
   const cardsInDiscardSuit = getCardsOfSuit(hand, discardSuit);
+
+  // 【防御性编程】确保有牌可垫
+  if (!cardsInDiscardSuit || cardsInDiscardSuit.length === 0) {
+    // 回退：直接返回手牌中最小的一张
+    return hand[hand.length - 1];
+  }
+
   return cardsInDiscardSuit[cardsInDiscardSuit.length - 1];  // 最小的
 }
 
@@ -355,6 +374,11 @@ export function makeAIDecision(
       return selectLeadCard(hand);
     }
     const leadSuit = trick.cards[0].card.suit;
-    return selectFollowCard(hand, trick, leadSuit, myPosition, partnerPosition);
+    console.log(`AI: ${myPosition} 跟牌，领出花色=${leadSuit}，当前墩=${trick.cards.length}张`);
+    const result = selectFollowCard(hand, trick, leadSuit, myPosition, partnerPosition);
+    if (!result) {
+      console.warn(`AI: ${myPosition} selectFollowCard 返回 null/undefined`);
+    }
+    return result;
   }
 }
