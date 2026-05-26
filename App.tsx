@@ -339,6 +339,7 @@ export default function App() {
       if (updatedTrick.cards.length === 4) {
         // 墩已满，结算这一墩
         const winner = determineTrickWinner(updatedTrick);
+        console.log(`handlePlayCard: 墩满4张，赢家=${winner}，打出第4张的是 ${position}`);
 
         // 更新赢墩数
         const isNSWinner = winner === Position.North || winner === Position.South;
@@ -395,7 +396,9 @@ export default function App() {
           }, 2000);
         } else {
           // 游戏未结束：延迟2秒后清空当前墩，开始新的一墩
+          console.log(`墩满: 赢家=${winner}，2秒后开始新墩`);
           setTimeout(() => {
+            console.log(`墩结算完成: 设置 currentPlayer=${winner}，清空墩`);
             setGameState(prev => {
               if (!prev) return null;
               return {
@@ -406,7 +409,6 @@ export default function App() {
             });
             // 清空显示状态
             setCompletedTrickDisplay({ trick: null, winner: null, isShowing: false });
-            // 【关键】清除结算标记，允许 AI 继续出牌（已移除 isTrickSettling 状态）
           }, 2000); // 2秒延迟，让玩家看清结果
         }
 
@@ -459,16 +461,30 @@ export default function App() {
    * 避免 gameState 更新导致无限循环。
    */
   useEffect(() => {
-    console.log(`AI Effect 触发: currentPlayer=${gameState?.currentPlayer}, cardCount=${gameState?.currentTrick.cards.length}`);
+    console.log(`AI Effect 触发: currentPlayer=${gameState?.currentPlayer}, cardCount=${gameState?.currentTrick.cards.length}, screen=${currentScreen}, gameOver=${gameOverResult?.isShowing}`);
 
     // 关键：审牌阶段、没有游戏状态、或游戏已结束时，不执行 AI 出牌
-    if (currentScreen !== 'game' || !gameState || gameOverResult?.isShowing) return;
+    if (currentScreen !== 'game') {
+      console.log('AI Effect: 不在游戏界面，返回');
+      return;
+    }
+    if (!gameState) {
+      console.log('AI Effect: 无游戏状态，返回');
+      return;
+    }
+    if (gameOverResult?.isShowing) {
+      console.log('AI Effect: 游戏结束画面显示中，返回');
+      return;
+    }
 
     const currentPlayer = gameState.players.find(
       p => p.position === gameState.currentPlayer
     );
 
-    if (!currentPlayer) return;
+    if (!currentPlayer) {
+      console.log(`AI Effect: 找不到玩家 ${gameState.currentPlayer}，返回`);
+      return;
+    }
 
     // 判断当前玩家是否需要 AI 代劳
     let shouldAIPlay = false;
@@ -555,6 +571,56 @@ export default function App() {
     return () => clearTimeout(timer);
     // 【关键依赖】只监听必要的状态变化，避免不必要的重新触发
   }, [currentScreen, gameState?.currentPlayer, gameOverResult?.isShowing]);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 【兜底超时机制】
+  // 当某个玩家卡住超过5秒时，自动强制出牌
+  // 防止游戏因为状态不一致而永久卡住
+  // ─────────────────────────────────────────────────────────────────────────
+  const playerStartTimeRef = useRef<number>(0);
+  const [stuckCount, setStuckCount] = useState(0); // 统计卡住次数
+
+  // 更新玩家开始时间
+  useEffect(() => {
+    if (gameState?.currentPlayer) {
+      playerStartTimeRef.current = Date.now();
+      console.log(`【兜底】${gameState.currentPlayer} 开始计时`);
+    }
+  }, [gameState?.currentPlayer]);
+
+  // 兜底超时检查
+  useEffect(() => {
+    if (!gameState || currentScreen !== 'game' || gameOverResult?.isShowing) return;
+
+    const timer = setInterval(() => {
+      const elapsed = Date.now() - playerStartTimeRef.current;
+      const currentPlayer = gameState.players.find(p => p.position === gameState.currentPlayer);
+
+      // 5秒超时，且当前是 AI 或明手
+      if (elapsed > 5000 && currentPlayer && (!currentPlayer.isHuman || currentPlayer.position === gameState.dummy)) {
+        console.log(`【兜底超时】${gameState.currentPlayer} 卡住 ${elapsed}ms，强制执行出牌`);
+
+        // 强制出牌：直接调用 makeAIDecision，忽略所有保护
+        const partnerPosition = getPartner(currentPlayer.position);
+        const cardToPlay = makeAIDecision(
+          currentPlayer.hand,
+          gameState.currentTrick,
+          currentPlayer.position,
+          partnerPosition
+        );
+
+        if (cardToPlay) {
+          console.log(`【兜底】强制执行出牌: ${currentPlayer.position} 出 ${cardToPlay.suit}${cardToPlay.rank}`);
+          handlePlayCard(currentPlayer.position, cardToPlay);
+          setStuckCount(c => c + 1);
+        } else {
+          console.warn(`【兜底】无法决策，手牌为空`);
+        }
+      }
+    }, 1000); // 每秒检查一次
+
+    return () => clearInterval(timer);
+  }, [gameState, currentScreen, gameOverResult?.isShowing, handlePlayCard]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // 渲染部分
