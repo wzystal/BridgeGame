@@ -680,8 +680,10 @@ export default function App() {
                   <TouchableOpacity
                     style={styles.playAgainButton}
                     onPress={() => {
+                      // 回到菜单首页，让用户重新选择牌制
                       setGameOverResult(null);
-                      handleResetGame();
+                      setGameState(null);
+                      setCurrentScreen('menu');
                     }}
                   >
                     <Text style={styles.playAgainText}>重新开局</Text>
