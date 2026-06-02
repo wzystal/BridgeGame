@@ -236,20 +236,3 @@ adb install -r bridgegame-debug.apk
 ```
 
 ---
-
-## 📦 提交记录
-
-| 提交 | 说明 |
-|------|------|
-| `feat: 添加 Android 构建脚本，修复颜色资源缺失` | 新增 build-android.sh，支持一键构建独立 APK |
-| `feat: 修改应用名称为'迷你桥牌'，重新开局回到菜单首页` | 优化用户体验，重新开局可选择牌制 |
-
----
-
-## 📄 开源协议
-
-MIT License
-
----
-
-**💡 提示：** 如需重新生成 Android 原生项目，请删除 `android` 目录后重新运行 `npx expo prebuild --platform android`。
