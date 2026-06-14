@@ -3,4 +3,5 @@
     <color name="splashscreen_background">#FFFFFF</color>
     <color name="colorPrimary">#4630EB</color>
     <color name="colorPrimaryDark">#4630EB</color>
+    <color name="ic_launcher_background">#0D3328</color>
 </resources>
